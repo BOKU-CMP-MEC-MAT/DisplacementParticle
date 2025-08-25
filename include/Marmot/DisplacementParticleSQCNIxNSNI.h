@@ -227,15 +227,12 @@ namespace Marmot::Meshfree {
   {
     using namespace Marmot::FastorIndices;
     using namespace Fastor;
-    using ink   = Fastor::Index< i_, n_, k_ >;
     using to_jk = Fastor::OIndex< j_, k_ >;
     using ijmM  = Index< i_, j_, m_, M_ >;
     using mMK   = Index< m_, M_, K_ >;
     using ijK   = Fastor::Index< i_, j_, K_ >;
     using ijkM  = Fastor::Index< i_, j_, k_, M_ >;
     using jK    = Fastor::Index< j_, K_ >;
-    using klmM  = Fastor::Index< k_, l_, m_, M_ >;
-    using klM   = Fastor::Index< k_, l_, M_ >;
 
     const auto& _nNodes = this->_nNodes;
     const auto& _N      = this->_N;
