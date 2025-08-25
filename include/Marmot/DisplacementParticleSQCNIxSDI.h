@@ -938,20 +938,21 @@ namespace Marmot::Meshfree {
       mp->incrementDeformation( du, du_dY );
       mp->computeYourself( timeNew, dT );
 
-      const double density = mp->getDensity();
+      const double density0 = mp->getDensityUndeformed();
 
-      // TODO Matthias improve:
-      TensorMap< double, nDim > _particle_velocity( mp->getStateView( "velocity" ).stateLocation );
-      TensorMap< double, nDim > _particle_acceleration( mp->getStateView( "acceleration" ).stateLocation );
+      auto v = mp->getVelocity();
+      auto a = mp->getAcceleration();
 
       Tensor< double, nDim, nDim > da_ddu( 0.0 );
       Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
-                                                               _particle_velocity.data(),
-                                                               _particle_acceleration.data(),
+                                                               v.data(),
+                                                               a.data(),
                                                                dT,
                                                                this->_newmark_beta,
                                                                this->_newmark_gamma,
                                                                da_ddu.data() );
+      mp->setVelocity( v );
+      mp->setAcceleration( a );
 
       Tensor< double, nDim > r_U( 0.0 );
 
@@ -980,7 +981,7 @@ namespace Marmot::Meshfree {
             r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
 
             // add inertia
-            r_U += density * _particle_acceleration * T_A * V0;
+            r_U += density0 * a * T_A * V0;
 
             {
               using namespace Eigen;
@@ -1002,7 +1003,7 @@ namespace Marmot::Meshfree {
 
               k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
 
-              k_UU += density * da_ddu * T_A * N_B * V0;
+              k_UU += density0 * da_ddu * T_A * N_B * V0;
 
               {
                   using namespace Eigen;
