@@ -327,6 +327,13 @@ namespace Marmot::Meshfree {
 
     virtual double getVolumeUndeformed() const { return _mp.getVolumeUndeformed(); };
 
+    virtual void getEvaluationCoordinates( double* coordinates ) const { getVertexCoordinates( coordinates ); }
+
+    virtual int getNumberOfEvaluationPoints() const
+    {
+      return 1; // only one evaluation point at the center of the particle
+    };
+
   private:
     virtual void updateParticlePositionToReferenceIntermediate()
     {
@@ -345,6 +352,7 @@ namespace Marmot::Meshfree {
       _P.resize( _nVCIConstraints );
       _P_Gradient.resize( _nVCIConstraints, nDim );
     };
+
   };
 
   template < int nDim >
