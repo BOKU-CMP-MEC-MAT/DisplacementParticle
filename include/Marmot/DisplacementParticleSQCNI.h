@@ -187,6 +187,21 @@ namespace Marmot::Meshfree {
                            i * ParentPointParticle::_nVCIConstraints + C] += TBoundary( A ) * PBoundary( C ) * N_dAY[i];
     };
 
+    virtual void getEvaluationCoordinates( double* coordinates ) const
+    {
+
+      Eigen::Map< Eigen::Matrix< double, nDim, nVertices > > segmentCenters( coordinates );
+
+      Eigen::Matrix< double, nDim, nVertices > vertexCoordinates;
+      getVertexCoordinates( vertexCoordinates.data() );
+
+      for ( int i = 0; i < nVertices; i++ ) {
+        segmentCenters.col( i ) = 0.5 * ( vertexCoordinates.col( ( i + 1 ) % nVertices ) + vertexCoordinates.col( i ) );
+      }
+    }
+
+    virtual int getNumberOfEvaluationPoints() const { return nVertices; };
+
   private:
     void _updateVertexDisplacementsFromMaterialPointDeformation();
 
