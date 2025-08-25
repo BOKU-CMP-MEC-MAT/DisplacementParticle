@@ -276,7 +276,7 @@ namespace Marmot::Meshfree {
     _mp.incrementDeformation( du, du_dY );
     _mp.computeYourself( timeNew, dT );
 
-    const double density = _mp.getDensity();
+    const double density = _mp.getDensityUndeformed();
     // TODO improve:
     TensorMap< double, nDim > _particle_velocity( _mp.getStateView( "velocity" ).stateLocation );
     TensorMap< double, nDim > _particle_acceleration( _mp.getStateView( "acceleration" ).stateLocation );
