@@ -224,10 +224,6 @@ namespace Marmot::Meshfree {
                                         double        timeNew,
                                         double        dT ) override;
 
-    virtual void computeConsistentInertia( double* I ) override;
-
-    virtual void computeLumpedInertia( double* I ) override;
-
     virtual void computeBodyLoad( int           type,
                                   const double* load,
                                   double*       fExt,
@@ -427,20 +423,21 @@ namespace Marmot::Meshfree {
     _mp.incrementDeformation( du, du_dY );
     _mp.computeYourself( timeNew, dT );
 
-    const double density = _mp.getDensity();
+    const double density0 = _mp.getDensityUndeformed();
 
-    // TODO improve:
-    TensorMap< double, nDim > _particle_velocity( _mp.getStateView( "velocity" ).stateLocation );
-    TensorMap< double, nDim > _particle_acceleration( _mp.getStateView( "acceleration" ).stateLocation );
+    auto v = _mp.getVelocity();
+    auto a = _mp.getAcceleration();
 
     Tensor< double, nDim, nDim > da_ddu( 0.0 );
     Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
-                                                             _particle_velocity.data(),
-                                                             _particle_acceleration.data(),
+                                                             v.data(),
+                                                             a.data(),
                                                              dT,
                                                              this->_newmark_beta,
                                                              this->_newmark_gamma,
                                                              da_ddu.data() );
+    _mp.setVelocity( v );
+    _mp.setAcceleration( a );
 
     Tensor< double, nDim > r_U( 0.0 );
 
@@ -469,7 +466,7 @@ namespace Marmot::Meshfree {
         r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
 
         // add inertia
-        r_U += density * _particle_acceleration * T_A * V0;
+        r_U += density0 * a * T_A * V0;
 
         {
           using namespace Eigen;
@@ -492,7 +489,7 @@ namespace Marmot::Meshfree {
 
           k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
 
-          k_UU += density * da_ddu * T_A * N_B * V0;
+          k_UU += density0 * da_ddu * T_A * N_B * V0;
 
           {
               using namespace Eigen;
@@ -502,46 +499,6 @@ namespace Marmot::Meshfree {
       }
     }
     // clang-format on
-  }
-
-  template < int nDim >
-  void DisplacementParticle< nDim >::computeConsistentInertia( double* I )
-  {
-    // constexpr int                 nodeBlockSize = nDim + nRot + 1;
-    // Eigen::Map< Eigen::MatrixXd > M( I, _nNodes * nodeBlockSize, _nNodes * nodeBlockSize );
-
-    // const double V0  = getVolumeUndeformed();
-    // const double rho = _mp.getDensity();
-
-    // const double m = rho * V0;
-
-    // const auto ones = Eigen::Matrix< double, nDim, nDim >::Ones();
-
-    // for ( int A = 0; A < _nNodes; A++ ) {
-    //   const int    idxA_u = nodeBlockSize * A;
-    //   const double N_A    = _N( A );
-
-    //   for ( int B = 0; B < _nNodes; B++ ) {
-    //     const int    idxB_u = nodeBlockSize * B;
-    //     const double N_B    = _N( B );
-
-    //     M.template block< nDim, nDim >( idxA_u, idxB_u ) += m * N_A * N_B * ones;
-    //   }
-    // }
-  }
-
-  template < int nDim >
-  void DisplacementParticle< nDim >::computeLumpedInertia( double* I )
-  {
-    // constexpr int                 nodeBlockSize = nDim + nRot + 1;
-    // Eigen::Map< Eigen::MatrixXd > M( I, _nNodes * nodeBlockSize, 1 );
-    // M.setZero();
-
-    // Eigen::MatrixXd CMM( _nNodes * nodeBlockSize, _nNodes * nodeBlockSize );
-    // CMM.setZero();
-    // computeConsistentInertia( CMM.data() );
-
-    // M = CMM.rowwise().sum();
   }
 
   template < int nDim >
