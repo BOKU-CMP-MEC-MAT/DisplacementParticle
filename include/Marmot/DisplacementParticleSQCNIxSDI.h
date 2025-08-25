@@ -467,6 +467,27 @@ namespace Marmot::Meshfree {
         }
     };
 
+    virtual void getEvaluationCoordinates( double* coordinates ) const
+    {
+
+      Eigen::Map< Eigen::Matrix< double, nDim, 8 > > segmentCenters( coordinates );
+
+      Eigen::Matrix< double, nDim, nVertices > vertexCoordinates;
+      getVertexCoordinates( vertexCoordinates.data() );
+
+      for ( int i = 0; i < nVertices; i++ ) {
+        segmentCenters.col( i * 2 )     = ( 0.25 * vertexCoordinates.col( ( i + 1 ) % nVertices ) +
+                                        0.75 * vertexCoordinates.col( i ) );
+        segmentCenters.col( i * 2 + 1 ) = ( 0.75 * vertexCoordinates.col( ( i + 1 ) % nVertices ) +
+                                            0.25 * vertexCoordinates.col( i ) );
+      }
+    }
+
+    virtual int getNumberOfEvaluationPoints() const
+    {
+      return nVertices * 2; // 2 evaluation points per segment
+    };
+
   private:
     /// \brief Update the vertex displacements from the material point deformation
     /// \details This function updates the vertex displacements of the particle
@@ -873,7 +894,6 @@ namespace Marmot::Meshfree {
   {
     using namespace Marmot::FastorIndices;
     using namespace Fastor;
-    using ink   = Fastor::Index< i_, n_, k_ >;
     using to_jk = Fastor::OIndex< j_, k_ >;
 
     const static Tensor< double, nDim, nDim > I(
