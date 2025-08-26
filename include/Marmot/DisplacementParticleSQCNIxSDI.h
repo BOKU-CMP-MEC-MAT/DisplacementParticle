@@ -904,9 +904,6 @@ namespace Marmot::Meshfree {
     const VertexCoordinatesSized vertexCoordinates_Intermediate = _vertexCoordinates_Undeformed +
                                                                   _vertexDisplacements_Intermediate;
 
-    // const auto vertexCoordinatesDeformed3x3 = _compute3x3From2x2( vertexCoordinates_Intermediate );
-    // const auto subSmoothingDomains          = _split3x3ToSubParticles( vertexCoordinatesDeformed3x3 );
-
     _dx_dY_center.eye();
     {
       const auto [N, dN_dY] = evaluateShapeFunctionsForVertexShapedDomain( vertexCoordinates_Intermediate );
@@ -964,15 +961,17 @@ namespace Marmot::Meshfree {
       auto a = mp->getAcceleration();
 
       Tensor< double, nDim, nDim > da_ddu( 0.0 );
-      Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
-                                                               v.data(),
-                                                               a.data(),
-                                                               dT,
-                                                               this->_newmark_beta,
-                                                               this->_newmark_gamma,
-                                                               da_ddu.data() );
-      mp->setVelocity( v );
-      mp->setAcceleration( a );
+      if ( dT > 0 ) {
+        Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
+                                                                 v.data(),
+                                                                 a.data(),
+                                                                 dT,
+                                                                 this->_newmark_beta,
+                                                                 this->_newmark_gamma,
+                                                                 da_ddu.data() );
+        mp->setVelocity( v );
+        mp->setAcceleration( a );
+      }
 
       Tensor< double, nDim > r_U( 0.0 );
 
@@ -988,50 +987,46 @@ namespace Marmot::Meshfree {
       Eigen::Map< Eigen::MatrixXd > K( dFInt_ddQ, _nNodes * nodeBlockSize, _nNodes * nodeBlockSize );
 
       // clang-format off
-        for ( int A = 0; A < _nNodes; A++ ) {
+      for ( int A = 0; A < _nNodes; A++ ) {
 
-          const double T_A = subDomain.T( A );
-          const auto                   dT_A_dY = TensorMap< const double, nDim >( subDomain.dT_dY.col( A ).data() );
-          const Tensor< double, nDim > dT_A_dx = einsum< ji, j >( inv( mp->dx_dY() ), dT_A_dY );
-          const Tensor< double, nDim > dT_A_dX = einsum< ji, j >( mp->dY_dX(), dT_A_dY );
+        const double T_A = subDomain.T( A );
+        const auto                   dT_A_dY = TensorMap< const double, nDim >( subDomain.dT_dY.col( A ).data() );
+        const Tensor< double, nDim > dT_A_dx = einsum< ji, j >( inv( mp->dx_dY() ), dT_A_dY );
 
+        const int idxA_u = nodeBlockSize * A;
+        r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
 
+        // add inertia
+        r_U += density0 * a * T_A * V0;
 
-            const int idxA_u = nodeBlockSize * A;
-            r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
+        {
+          using namespace Eigen;
+          P.template segment< nDim >( idxA_u ) += Map< Matrix< double, nDim, 1 > >( r_U.data() );
+        }
 
-            // add inertia
-            r_U += density0 * a * T_A * V0;
+        for ( int B = 0; B < _nNodes; B++ ) {
 
-            {
+          const int idxB_u = nodeBlockSize * B;
+
+          const double                 N_B     = subDomain.N( B );
+          const auto dN_B_dY = TensorMap< const double, nDim >( subDomain.dN_dY.col(B).data() );
+          const auto dN_B_dx = evaluate( einsum< ji, j >( inv( mp->dx_dY() ), dN_B_dY ) );
+
+          // aux stiffness tensors
+          const auto dS_dqU_B = evaluate ( + einsum < ijkl, l > ( t.dS_dDeltaF, dN_B_dY ) );
+          k_UU  = ( + einsum< i, ijk        > ( dT_A_dx, dS_dqU_B )                       ) * V0;
+
+          k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
+
+          k_UU += density0 * da_ddu * T_A * N_B * V0;
+
+          {
               using namespace Eigen;
-              P.template segment< nDim >( idxA_u ) += Map< Matrix< double, nDim, 1 > >( r_U.data() );
-            }
-
-            for ( int B = 0; B < _nNodes; B++ ) {
-
-              const int idxB_u = nodeBlockSize * B;
-
-              const double                 N_B     = subDomain.N( B );
-              const auto dN_B_dY = TensorMap< const double, nDim >( subDomain.dN_dY.col(B).data() );
-              const auto dN_B_dx = evaluate( einsum< ji, j >( inv( mp->dx_dY() ), dN_B_dY ) );
-              const auto dN_B_dX = evaluate( einsum< ji, j >( mp->dY_dX(), dN_B_dY ) ); // no dependence on current deformations!
-
-              // aux stiffness tensors
-              const auto dS_dqU_B = evaluate ( + einsum < ijkl, l > ( t.dS_dDeltaF, dN_B_dY )                                            );
-              k_UU  = ( + einsum< i, ijk        > ( dT_A_dx, dS_dqU_B )                                                       ) * V0;
-
-              k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
-
-              k_UU += density0 * da_ddu * T_A * N_B * V0;
-
-              {
-                  using namespace Eigen;
-                  // TODO: check if we can use transpose instead of torowmajor:
-                  K.template block< nDim, nDim >( idxA_u, idxB_u ) += Map< Matrix< double, nDim, nDim > >( torowmajor( k_UU ).data() );
-              }
+              // TODO: check if we can use transpose instead of torowmajor:
+              K.template block< nDim, nDim >( idxA_u, idxB_u ) += Map< Matrix< double, nDim, nDim > >( torowmajor( k_UU ).data() );
           }
         }
+      }
 
       // clang-format on
     }
