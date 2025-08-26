@@ -273,19 +273,23 @@ namespace Marmot::Meshfree {
     _mp.incrementDeformation( du, du_dY );
     _mp.computeYourself( timeNew, dT );
 
-    const double density = _mp.getDensityUndeformed();
-    // TODO improve:
-    TensorMap< double, nDim > _particle_velocity( _mp.getStateView( "velocity" ).stateLocation );
-    TensorMap< double, nDim > _particle_acceleration( _mp.getStateView( "acceleration" ).stateLocation );
+    const double density0 = _mp.getDensityUndeformed();
 
-    TensorDD da_ddu( 0.0 );
-    Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
-                                                             _particle_velocity.data(),
-                                                             _particle_acceleration.data(),
-                                                             dT,
-                                                             this->_newmark_beta,
-                                                             this->_newmark_gamma,
-                                                             da_ddu.data() );
+    auto v = _mp.getVelocity();
+    auto a = _mp.getAcceleration();
+
+    Tensor< double, nDim, nDim > da_ddu( 0.0 );
+    if ( dT > 0 ) {
+      Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
+                                                               v.data(),
+                                                               a.data(),
+                                                               dT,
+                                                               this->_newmark_beta,
+                                                               this->_newmark_gamma,
+                                                               da_ddu.data() );
+      _mp.setVelocity( v );
+      _mp.setAcceleration( a );
+    }
 
     TensorD r_U( 0.0 );
 
@@ -311,7 +315,6 @@ namespace Marmot::Meshfree {
       const double T_A = _T( A );
       const auto  dT_A_dY = TensorMap< const double, nDim >( _dT_dY.col( A ).data() );
       const TensorD dT_A_dx = einsum< ji, j >( dY_dx , dT_A_dY );
-      const TensorD dT_A_dX = einsum< ji, j >( _mp.dY_dX(), dT_A_dY );
 
 
       const int idxA_u = nodeBlockSize * A;
@@ -319,7 +322,7 @@ namespace Marmot::Meshfree {
       r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
 
       // add inertia
-      r_U += density * _particle_acceleration * T_A * V0;
+      r_U += density0 * a * T_A * V0;
 
       const auto d2NA_dYdY = extract_d2N_dYdY_for_node( _d2N_dYdY, A );
 
@@ -343,7 +346,6 @@ namespace Marmot::Meshfree {
         const double                 N_B     = _N( B );
         const auto dN_B_dY = TensorMap< const double, nDim >( _dN_dY.col(B).data() );
         const auto dN_B_dx = evaluate( einsum< ji, j >( dY_dx, dN_B_dY ) ); //
-        const auto dN_B_dX = evaluate( einsum< ji, j >( _mp.dY_dX(), dN_B_dY ) ); // no dependence on current deformations!
         const auto d2NB_dYdY = extract_d2N_dYdY_for_node( _d2N_dYdY, B );
 
         // aux stiffness tensors
@@ -352,7 +354,7 @@ namespace Marmot::Meshfree {
         k_UU  = ( + einsum< i, ijk        > ( dT_A_dx, dS_dqU_B )                                                       ) * V0;
         k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
 
-        k_UU += density * da_ddu * T_A * N_B * V0;
+        k_UU += density0 * da_ddu * T_A * N_B * V0;
 
         // clang-format on
         const TensorDDDD d2S_dqu_dY = einsum< ijkM, MK >( t.dS_dDeltaF, d2NB_dYdY );
