@@ -279,17 +279,15 @@ namespace Marmot::Meshfree {
     auto a = _mp.getAcceleration();
 
     Tensor< double, nDim, nDim > da_ddu( 0.0 );
-    if ( dT > 0 ) {
-      Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
-                                                               v.data(),
-                                                               a.data(),
-                                                               dT,
-                                                               this->_newmark_beta,
-                                                               this->_newmark_gamma,
-                                                               da_ddu.data() );
-      _mp.setVelocity( v );
-      _mp.setAcceleration( a );
-    }
+    Marmot::TimeIntegration::newmarkBetaIntegration< nDim >( du.data(),
+                                                             v.data(),
+                                                             a.data(),
+                                                             dT,
+                                                             this->_newmark_beta,
+                                                             this->_newmark_gamma,
+                                                             da_ddu.data() );
+    _mp.setVelocity( v );
+    _mp.setAcceleration( a );
 
     TensorD r_U( 0.0 );
 
