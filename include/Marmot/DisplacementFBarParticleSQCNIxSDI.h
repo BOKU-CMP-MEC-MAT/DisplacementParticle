@@ -33,7 +33,6 @@ namespace Marmot::Meshfree {
   class DisplacementFBarParticleSQCNIxSDI : public GenericSDIParticle< nDim, nVertices > {
 
   protected:
-    // Shadowing: Wir definieren den MaterialPointType explizit für dieses Partikel
     using MaterialPointType = std::conditional_t< nDim == 2,
                                                   Marmot::MaterialPoints::DisplacementFBarMaterialPoint2D,
                                                   Marmot::MaterialPoints::DisplacementFBarMaterialPoint3D >;
@@ -41,7 +40,6 @@ namespace Marmot::Meshfree {
     using TensorD  = typename GenericSDIParticle< nDim, nVertices >::TensorD;
     using TensorDD = typename GenericSDIParticle< nDim, nVertices >::TensorDD;
     
-    // Vektor verwendet nun automatisch den 2D oder 3D Typ OHNE Template-Parameter <nDim>
     std::vector< std::unique_ptr< MaterialPointType > > _subdomainMaterialPoints;
 
     constexpr int static nStateVarsParticle = nDim * nVertices + nDim; // vertex displacements + center displacement
@@ -120,7 +118,6 @@ namespace Marmot::Meshfree {
     virtual double getVolumeDeformed() const
     {
       double volDeformed = 0.0;
-      // Der neue MP speichert das wahre geometrische F in dY_dX() - perfekt für Volumen!
       for ( const auto& mp : _subdomainMaterialPoints ) volDeformed += mp->getVolumeUndeformed() * Fastor::determinant( mp->dY_dX() );
       return volDeformed;
     }
@@ -251,7 +248,6 @@ namespace Marmot::Meshfree {
       const double subV0 = initialParticleDomain.getVolumeUndeformed();
       const auto   X0    = initialParticleDomain.getCenterCoordinates();
 
-      // unique_ptr erwartet jetzt direkt den MaterialPointType (2D oder 3D)
       _subdomainMaterialPoints.push_back( std::make_unique< MaterialPointType >( elementID, X0.data(), 1, subV0 ) );
     }
 
@@ -339,7 +335,7 @@ namespace Marmot::Meshfree {
 
     constexpr int nodeBlockSize = nDim;
 
-    // 1. ZENTRALE KINEMATIK
+    // kinematik center
     const auto [N_cen, dN_dY_cen_eigen] = this->evaluateShapeFunctionsAndDerivativesForParticleDomain( this->_particleDomainMain );
 
     TensorDD deltaF_cen = transpose( TensorDD(this->_centralDeformationGradientDelta.data()) );
@@ -363,19 +359,14 @@ namespace Marmot::Meshfree {
         du_dY += einsum< i, j >( dQU, dN_B_dY );
       }
 
-      // 2. F-BAR KINEMATIK (Relative Scale)
+      // Fbar KINEMATIK (Relative Scale)
       TensorDD deltaF_sub = I + du_dY;
       double J_sub_delta = determinant(deltaF_sub);
 
-      // Dieser inkrementelle Skalar wird vom MP für die perfekte Total-F-Bar Integration genutzt!
       double fbarScale = std::pow( J_cen_delta / J_sub_delta, 1.0 / static_cast<double>(nDim) );
 
       mp->prepareYourself( timeNew, dT );
-      
-      // Übergebe das echte geometrische Inkrement und den F-Bar Skalar
       mp->incrementDeformation( du, du_dY, fbarScale );
-
-      // Sende das Zentrum für den State Tracker (Optional aber sauber)
       Eigen::Matrix<double, nDim, 1> centerCoords = Eigen::Map<const Eigen::Matrix<double, nDim, 1>>(this->_particleDomainMain.getCenterCoordinates().data());
       mp->updateCenter(centerCoords, deltaF_cen);
 
@@ -402,11 +393,8 @@ namespace Marmot::Meshfree {
       double p_tau = tr_S / static_cast<double>(nDim);
 
       TensorDD inv_deltaF_sub = inverse(deltaF_sub);
-      
-      // Hole das skalierte F-Bar Inkrement aus dem Materialpunkt!
       TensorDD deltaF_bar = mp->dx_dY_bar(); 
 
-      // t.dS_dDeltaF ist vom MP bereits intern als dS/dDeltaF_bar skaliert worden!
       TensorDD C_F = evaluate( einsum<ijkl, kl>(t.dS_dDeltaF, deltaF_bar) );
 
       for ( int A = 0; A < this->_nNodes; A++ ) {
@@ -420,7 +408,6 @@ namespace Marmot::Meshfree {
 
         const int idxA_u = nodeBlockSize * A;
 
-        // 3. F-BAR INTERNE KRÄFTE
         TensorD r_U_bar = einsum< i, ij >( dT_A_dx, S ) - p_tau * dT_A_dx + p_tau * dT_A_dx_cen;
         TensorD r_U = r_U_bar * V0;
 
@@ -442,8 +429,6 @@ namespace Marmot::Meshfree {
           TensorD dN_B_dY_cen = Tensor< double, nDim >( dN_dY_cen_eigen.col( B ).data() );
           TensorD dN_B_dx_cen = einsum< ji, j >( inv_deltaF_cen, dN_B_dY_cen );
 
-          // 4. F-BAR TANGENTENMATRIX
-          // Die alte Skalierung "scale_total" bzw. "scale" ist hier fbarScale
           auto dS_dqU_B = evaluate ( fbarScale * einsum < ijkl, l > ( t.dS_dDeltaF, dN_B_dY ) );
 
           Tensor<double, nDim, nDim, nDim> C_F_x_dN_dx = outer(C_F, dN_B_dx);
@@ -464,7 +449,7 @@ namespace Marmot::Meshfree {
           k_UU_mat += term23;
           k_UU_mat *= V0;
 
-          // Geometrische Steifigkeit
+          // geometric stiffness contribution
           TensorDD k_UU_geo = ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) );
           TensorDD k_UU_geo_p = p_tau * outer(dN_B_dx, dT_A_dx) - p_tau * outer(dN_B_dx_cen, dT_A_dx_cen);
 
