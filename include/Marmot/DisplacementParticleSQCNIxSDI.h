@@ -33,6 +33,7 @@
 #include <Eigen/Dense>
 #include <Fastor/Fastor.h>
 #include <stdexcept>
+#include <vector>
 
 namespace Marmot::Meshfree {
 
@@ -412,6 +413,12 @@ namespace Marmot::Meshfree {
 
     constexpr int nodeBlockSize = nDim;
 
+    // Scratch for the per-B loop invariants cached in each subdomain below. Allocated once per call
+    // rather than per subdomain; nNodes is fixed for the whole call. Each particle is evaluated by a
+    // single thread, so no sharing concerns arise.
+    std::vector< Fastor::Tensor< double, nDim > >             dN_dx_cache( this->_nNodes );
+    std::vector< Fastor::Tensor< double, nDim, nDim, nDim > > dS_dqU_cache( this->_nNodes );
+
     for ( size_t mpNumber = 0; mpNumber < this->_subDomainShapeFunctions.size(); mpNumber++ ) {
       auto& mp = this->_subdomainMaterialPoints[mpNumber];
       auto& sd = this->_subDomainShapeFunctions[mpNumber];
@@ -467,12 +474,28 @@ namespace Marmot::Meshfree {
       Eigen::Map< Eigen::VectorXd > P( fInt, this->_nNodes * nodeBlockSize );
       Eigen::Map< Eigen::MatrixXd > K( dFInt_ddQ, this->_nNodes * nodeBlockSize, this->_nNodes * nodeBlockSize );
 
+      // Loop invariants of the (A,B) double loop below, evaluated once per subdomain instead of
+      // once per (A,B) pair. dx_dY() returns a materialized 3x3 slice by value, and inv() a
+      // division-bearing 3x3 inverse, so calling them O(nNodes^2) times dominated the loop while
+      // being constant over it: mp->computeYourself() above is what last changed them.
+      const Fastor::Tensor< double, nDim, nDim > dx_dY_inv = inv( mp->dx_dY() );
+
+      // Quantities that depend on B only. They were previously recomputed for every A, i.e. nNodes
+      // times more often than needed -- dS_dqU_B in particular is a 4th-order tangent contracted
+      // with a vector. Cached here in one pass over B, then read in the inner loop.
+      for ( int B = 0; B < this->_nNodes; B++ ) {
+        const auto dN_B_dY = TensorMap< const double, nDim >( sd.dN_dY.col( B ).data() );
+
+        dN_dx_cache[B]  = evaluate( einsum< ji, j >( dx_dY_inv, dN_B_dY ) );
+        dS_dqU_cache[B] = evaluate( +einsum< ijkl, l >( t.dS_dDeltaF, dN_B_dY ) );
+      }
+
       // clang-format off
       for ( int A = 0; A < this->_nNodes; A++ ) {
 
         const double T_A = sd.T( A );
         const auto                   dT_A_dY = TensorMap< const double, nDim >( sd.dT_dY.col( A ).data() );
-        const Tensor< double, nDim > dT_A_dx = einsum< ji, j >( inv( mp->dx_dY() ), dT_A_dY );
+        const Tensor< double, nDim > dT_A_dx = einsum< ji, j >( dx_dY_inv, dT_A_dY );
 
         const int idxA_u = nodeBlockSize * A;
         r_U = ( +einsum< i, ij >( dT_A_dx, S ) ) * V0;
@@ -489,12 +512,11 @@ namespace Marmot::Meshfree {
 
           const int idxB_u = nodeBlockSize * B;
 
-          const double                 N_B     = sd.N( B );
-          const auto dN_B_dY = TensorMap< const double, nDim >( sd.dN_dY.col(B).data() );
-          const auto dN_B_dx = evaluate( einsum< ji, j >( inv( mp->dx_dY() ), dN_B_dY ) );
+          const double N_B = sd.N( B );
 
-          // aux stiffness tensors
-          const auto dS_dqU_B = evaluate ( + einsum < ijkl, l > ( t.dS_dDeltaF, dN_B_dY ) );
+          // hoisted above: both depend on B only
+          const auto& dN_B_dx  = dN_dx_cache[B];
+          const auto& dS_dqU_B = dS_dqU_cache[B];
           k_UU  = ( + einsum< i, ijk        > ( dT_A_dx, dS_dqU_B )                       ) * V0;
 
           k_UU += ( - einsum< k, ij, i, to_jk >( dT_A_dx, S, dN_B_dx ) ) * V0;
